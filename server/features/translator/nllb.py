@@ -295,7 +295,14 @@ class Translator(TranslatorProtocol):
             logger.exception("batch: translate_batch fallo para el lote completo")
             return results
 
-        for position, translation in zip(indices, batch, strict=True):
+        # strict=False (default) a proposito: si translate_batch alguna vez
+        # devolviera una lista de largo distinto a indices (hoy garantizado
+        # estructuralmente porque ambas derivan de source_tokens, pero el
+        # invariante es "NUNCA lanza", sin excepciones por "no deberia
+        # pasar"), zip trunca al mas corto en vez de lanzar ValueError — las
+        # posiciones sin traduccion quedan en None (su valor por defecto),
+        # degradando en silencio en vez de reventar.
+        for position, translation in zip(indices, batch, strict=False):
             try:
                 # hypotheses[0][0] es el token de idioma destino - saltearlo antes
                 # de reconvertir a ids y decodificar (ver docs/BATCH-SPIKE-NOTES.md).
