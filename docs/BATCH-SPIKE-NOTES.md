@@ -1,5 +1,16 @@
 # Notas de implementación del endpoint batch
 
+## ⚠️ Bloqueante para S4 — leer antes de escribir código
+
+**Texto vacío en el batch: `translate_batch` NO lanza y NO devuelve vacío — alucina una traducción con
+forma válida.** Confirmado empíricamente (S2): con `texts = [..., ""]`, el resultado para el string vacío
+fue `'' -> '¿Qué quieres decir?'` ("What do you mean?" en español), indistinguible de una traducción real
+sin inspeccionar el input de antemano. **S4 debe filtrar los textos vacíos ANTES de armar
+`source_tokens`/`target_prefix`** (excluirlos del batch, reinsertar `""` en la posición correspondiente
+del resultado final) — no hay ninguna señal post-hoc (excepción, hypothesis vacía) que permita
+detectarlos después de llamar a `translate_batch`. Detalle completo en
+`## Firma confirmada de translate_batch` → último bullet.
+
 ## Corrección del controlador (post-S1): el prefijo `/api` SÍ existe
 
 Verificado en vivo contra prod (`curl https://nllb.corhild.com/api/v4/translator?...` → 200; el mismo path sin `/api` → 401 de OTRO router de Traefik, ni siquiera llega a este container) y confirmado por lectura de `server/config.py:107`: `server_root_path: str = "/api"` es el DEFAULT (sin env var), usado en `server/__init__.py` como `url_path_prefix=config.server_root_path` al montar la app ASGI. Las notas de abajo describen el router de Litestar relativo a ese montaje (`/v4/translator`), pero el path público real — el que S5 debe testear y el que Track C (`nllb-client.ts`) ya usa — es **`/api/v4/translator`**, y el batch nuevo será **`/api/v4/translator/batch`**. Ningún ajuste de código hace falta — el contrato ya documentado en el plan (`POST /api/v4/translator/batch`) era correcto; esto solo llena el hueco de POR QUÉ, para que S5 no se confunda si prueba local sin el `/api` y ve 404/401 inesperados.
@@ -157,8 +168,15 @@ Estos son los ajustes que S2–S5 deben aplicar ANTES de escribir código, por l
    ```
    y la decodificación real es `self.tokeniser.decode(token_ids)` (recibe IDs, no tokens de texto — comparar con `translate()` existente, que hace `self.tokeniser.decode(tuple(...))` sobre los IDs que devuelve `translate_generator`). S4 debe reescribir `_encode_one`/el paso de decode contra esta API real, no la de `transformers`.
 
-3. **S4 — `translate_batch` de CTranslate2 sigue sin confirmar (bloqueado en S2).**
-   El camino single-text HOY usa `self.translator.generate_tokens(...)`, no `translate_batch(...)`. El código de ejemplo de S4 asume `self.translator.translate_batch(source_tokens, target_prefix=[[target]] * len(source_tokens))` devolviendo objetos con `.hypotheses[0]` — eso es plausible para la API pública de `ctranslate2.Translator` (existe en versiones recientes), pero **no se puede confirmar por lectura del camino single**, porque el camino single nunca lo usa. S2 debe spikear esto contra CTranslate2 4.8.1 real antes de que S4 escriba una sola línea.
+3. **S4 — `translate_batch` de CTranslate2 YA CONFIRMADO (ver `## Firma confirmada de translate_batch` arriba).**
+   Confirmado empíricamente contra CTranslate2 4.8.1 real: `translate_batch` existe, con la firma
+   `translate_batch(source: list[list[str]], target_prefix: list[list[str]] = None, **gen_kwargs) -> list[TranslationResult]`.
+   `source`/`target_prefix` son listas de **tokens de texto**, no ids. `result.hypotheses[0]` también es
+   una lista de tokens de texto (`hyp[0]` = idioma destino, saltear), hay que reconvertir a ids con
+   `tokeniser.token_to_id(tok)` (lista concreta, no generador) antes de `tokeniser.decode(ids)`. Llamada
+   exacta que corrió OK y las 3 traducciones reales que imprimió: ver
+   `## Firma confirmada de translate_batch`. **⚠️ Ver también el bloque "Bloqueante para S4" al final de
+   este documento antes de escribir código — el caso de texto vacío NO se puede ignorar.**
 
 4. **S4 — Falta un logger en `nllb.py`.**
    El módulo `server/features/translator/nllb.py` HOY no importa ni usa `logging` en ningún lado (a diferencia de `server/app.py`, que sí tiene `getLogger(app_name)`). El código de ejemplo de S4 usa `logger.warning(...)`/`logger.exception(...)` sin definir `logger` — S4 debe agregar `from logging import getLogger` + `logger = getLogger(__name__)` al tope del archivo (siguiendo el patrón de `server/app.py`, que usa el nombre de la app; en un módulo de feature, `__name__` es lo estándar).
