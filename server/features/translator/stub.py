@@ -139,3 +139,30 @@ class TranslatorStub(TranslatorProtocol):
             the translated text
         """
         yield from (f"{word} from {source_language} to {target_language}" for word in text.split())
+
+    def translate_batch_texts(
+        self, texts: list[str], source_language: Language, target_language: Language
+    ) -> list[str | None]:
+        """
+        Summary
+        -------
+        translate N texts in a single CTranslate2 pass instead of N passes
+
+        Parameters
+        ----------
+        texts (list[str])
+            the texts to translate
+
+        source_language (Languages)
+            the source language
+
+        target_language (Languages)
+            the target language
+
+        Returns
+        -------
+        translated_texts (list[str | None])
+            the translation of each text, same order and length as `texts`; `None`
+            marks a text that could not be translated (empty, or a per-item failure)
+        """
+        return [self.translate(text, source_language, target_language) if text.strip() else None for text in texts]

@@ -18,6 +18,9 @@ class TranslatorProtocol(Protocol):
     translate_stream(text: str, source_language: Language, target_language: Language) -> Iterator[str]
         streams the translation input from the source language to the target language
 
+    translate_batch_texts(texts: list[str], source_language: Language, target_language: Language) -> list[str | None]
+        translate N texts in a single pass
+
     unload_model(to_cpu: bool) -> bool
         unload the model from the current device
 
@@ -131,5 +134,32 @@ class TranslatorProtocol(Protocol):
         -------
         translated_text (Iterator[str])
             the translated text
+        """
+        ...
+
+    def translate_batch_texts(
+        self, texts: list[str], source_language: Language, target_language: Language
+    ) -> list[str | None]:
+        """
+        Summary
+        -------
+        translate N texts in a single CTranslate2 pass instead of N passes
+
+        Parameters
+        ----------
+        texts (list[str])
+            the texts to translate
+
+        source_language (Languages)
+            the source language
+
+        target_language (Languages)
+            the target language
+
+        Returns
+        -------
+        translated_texts (list[str | None])
+            the translation of each text, same order and length as `texts`; `None`
+            marks a text that could not be translated (empty, or a per-item failure)
         """
         ...
