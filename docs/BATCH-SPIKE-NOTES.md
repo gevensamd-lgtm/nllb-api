@@ -50,8 +50,98 @@ Los tres paths que el plan asumió a ciegas resultaron correctos letra por letra
 - `4.8.1` — confirmado por `uv.lock` (`name = "ctranslate2"`, `version = "4.8.1"`), que es la resolución exacta pinneada por `pyproject.toml` (`ctranslate2>=4.8.1`). No hay contenedor corriendo todavía en este repo recién clonado, así que no se pudo correr `pip show ctranslate2` dentro de un container real — `uv.lock` es la fuente de verdad más fuerte disponible sin levantar el modelo (que requiere descargar pesos de Hugging Face). S2 debe re-confirmar esta versión dentro del container/entorno donde corra el spike, por si el lockfile diverge del entorno de ejecución real.
 - Python: `requires-python = ">=3.14.6, <3.15"` — Python 3.14, más nuevo de lo que suele asumirse por defecto. Relevante para S6 (build de imagen Docker) si se asume una base image con otra versión de Python.
 
-## Firma confirmada de translate_batch  (COMPLETAR EN TASK S2)
-Pendiente — S2 es quien corre el spike empírico contra `ctranslate2.Translator` real (versión 4.8.1) para confirmar si `translate_batch(...)` existe con la firma que S4 del plan asume (`source_tokens: list[list[str]]`, `target_prefix: list[list[str]]` → objetos con `.hypotheses[0]`), o si hace falta otro método/forma de invocación. **No completar acá — este archivo lo actualiza S2.**
+## Firma confirmada de translate_batch
+
+Confirmado empíricamente corriendo `ctranslate2.Translator.translate_batch` real dentro del container
+`ghcr.io/winstxnhdw/nllb-api:main` (mismo entorno que producción, levantado ad-hoc vía SSH contra el host
+netcup — no hay Docker local en el entorno de desarrollo), con el modelo real descargado
+(`winstxnhdw/nllb-200-distilled-1.3B-ct2-int8`, path
+`~/.cache/huggingface/hub/models--winstxnhdw--nllb-200-distilled-1.3B-ct2-int8/snapshots/.../`) y el
+tokenizer real (`tokenizers.Tokenizer.from_file(".../tokenizer.json")`).
+
+- **Versión de ctranslate2 confirmada en el container real:** `4.8.1` (coincide con `uv.lock`; no se pudo
+  correr `pip show` dentro del container porque no tiene `pip` ni ninguna shell utility instalada —
+  imagen mínima sin `find`/`which`/`pip`, solo el intérprete Python. Se confirmó via
+  `ctranslate2.__version__` en su lugar).
+- **`translate_batch` SÍ existe** en `ctranslate2.Translator` (confirmado por
+  `dir(ctranslate2.Translator)` → incluye `translate_batch`, `generate_tokens`, `score_batch`,
+  `translate_file`, `translate_iterable`, entre otros). El plan NO tenía que caer a `generate_batch`
+  (ese método no existe; no está en el `dir()`).
+- **Firma real** (via `help(ctranslate2.Translator.translate_batch)`, coincide con la que S4 del plan
+  asumió, con nombres de kwargs exactos):
+  ```
+  translate_batch(self, source: List[List[str]], target_prefix: Optional[List[Optional[List[str]]]] = None,
+                   *, max_batch_size=0, batch_type='examples', beam_size=2, ...,
+                   sampling_temperature=1, no_repeat_ngram_size=0, suppress_sequences=None, ...)
+                   -> List[TranslationResult]
+  ```
+  `source` es una lista de listas de **tokens en texto** (`str`), NO de ids — igual que
+  `generate_tokens` del camino single. `target_prefix` es una lista de listas de tokens de texto
+  (un elemento por texto, cada uno una lista de UN token: el código de idioma destino), y acepta
+  `None` por elemento si no se quiere forzar prefijo para ese texto puntual.
+- **Llamada exacta que funciona** (copiada del script que corrió OK, ver salida abajo), calcada del
+  patrón de `translate_generator()` existente pero en batch:
+  ```python
+  source_tokens = [(source_language, *tokeniser.encode(text).tokens) for text in texts]
+  target_prefix = [[target_language]] * len(texts)
+
+  results = translator.translate_batch(
+      source_tokens,
+      target_prefix=target_prefix,
+      max_decoding_length=1024,
+      sampling_temperature=0,
+      no_repeat_ngram_size=3,
+      suppress_sequences=[[target_language]] * len(texts),
+  )
+
+  for text, result in zip(texts, results):
+      hyp = result.hypotheses[0]                       # lista de tokens (str), no ids
+      ids = [tokeniser.token_to_id(tok) for tok in hyp[1:]]  # [0] es el token de idioma destino, SALTEARLO
+      decoded = tokeniser.decode(ids)
+  ```
+  (los mismos kwargs de generación que ya usa `translate_generator()` en el camino single —
+  `max_decoding_length=1024`, `sampling_temperature=0`, `no_repeat_ngram_size=3`,
+  `suppress_sequences=(target_prefix,)` — se pasaron también en batch para reproducir el mismo
+  comportamiento determinista; no son parte de la firma mínima de `translate_batch`, pero S4 debería
+  mantenerlos por paridad con el resultado de `translate()` single-text.)
+- **Forma del resultado:** `results[i]` es un `ctranslate2.TranslationResult`. `.hypotheses[0]` es una
+  **lista de tokens de texto** (`list[str]`, ej. `['spa_Latn', '▁Buenos', '▁días', '▁.']`), NO una lista
+  de ids — a diferencia de `generate_tokens()` (camino single), que sí produce ids directamente vía
+  `result.token_id`. El **token de idioma destino ocupa la posición `0`** de cada hypothesis y **hay que
+  saltearlo** (`hyp[1:]`) antes de decodificar — si no se salta, `tokeniser.token_to_id('spa_Latn')`
+  devuelve un id real (no es basura) y contamina el texto decodificado con basura al inicio.
+  Para reconstruir el texto: convertir cada token de vuelta a id con `tokeniser.token_to_id(tok)`
+  (método de `tokenizers.Tokenizer`, no estaba documentado en las notas de S1 porque el camino single
+  nunca lo necesita — `generate_tokens` ya da ids) y pasar la **lista** (no generador; `tokeniser.decode`
+  requiere un `Sequence`, un generador lanza `TypeError: argument 'ids': 'generator' object is not an
+  instance of 'Sequence'`) a `tokeniser.decode(ids)`.
+- **Salida real del spike** (3 traducciones legibles + 1 caso vacío, ver punto siguiente):
+  ```
+  ctranslate2: 4.8.1
+  len(results) == 4 esperado 4
+  'Good morning' -> 'Buenos días .'
+  'The patient was discharged yesterday.' -> 'El paciente fue dado de alta ayer.'
+  'Please confirm receipt.' -> 'Por favor, confirme el recibo.'
+  ```
+  (el espacio antes del punto final en "días ." es un artefacto normal del detokenizador SentencePiece
+  al reconstruir el token `▁.`, el mismo mecanismo que usa `translate()` single-text hoy — no es un bug
+  introducido por el batch, no requiere fix en S4).
+- **Diferencias vs. lo que asumió el plan:** el plan (y el ejemplo del brief de esta task) asumía
+  `transformers.AutoTokenizer` con `convert_ids_to_tokens`/`convert_tokens_to_ids` — API equivocada,
+  ya corregida por S1 (`tokenizers.Tokenizer` real). Además, el plan no anticipaba que `translate_batch`
+  devuelve **tokens de texto**, no ids — obliga a un paso extra (`tokeniser.token_to_id`) que no existe
+  en el camino single (`generate_tokens` ya entrega ids). Fuera de eso, la firma coincide con lo asumido:
+  `source: list[list[str]]`, `target_prefix: list[list[str]]`, resultado con `.hypotheses[0]`.
+- **¿Un texto vacío hace que `translate_batch` lance, o devuelve una hipótesis vacía?**
+  **No lanza — devuelve una hipótesis NO vacía pero alucinada/sin sentido.** Con `texts[3] = ""`, el
+  tokenizer produce `source_tokens[3] == ('eng_Latn', '</s>', '<unk>')` (sin tokens de contenido) y
+  `translate_batch` igual genera una traducción: `'' -> '¿Qué quieres decir?'` ("What do you mean?" en
+  español) — el modelo alucina una respuesta plausible en vez de fallar o devolver cadena vacía. **Esto
+  confirma que S4 debe filtrar los textos vacíos ANTES de armar el batch** (excluirlos de
+  `source_tokens`/`target_prefix` y reinsertar `""` en la posición correspondiente del resultado final
+  sin pasar por el traductor) — depender de que `translate_batch` devuelva algo vacío o lance para
+  detectarlo NO funciona, el output es indistinguible de una traducción real sin inspeccionar el input
+  vacío de antemano.
 
 ## Ajustes al plan
 
