@@ -1,5 +1,9 @@
 # Notas de implementación del endpoint batch
 
+## Corrección del controlador (post-S1): el prefijo `/api` SÍ existe
+
+Verificado en vivo contra prod (`curl https://nllb.corhild.com/api/v4/translator?...` → 200; el mismo path sin `/api` → 401 de OTRO router de Traefik, ni siquiera llega a este container) y confirmado por lectura de `server/config.py:107`: `server_root_path: str = "/api"` es el DEFAULT (sin env var), usado en `server/__init__.py` como `url_path_prefix=config.server_root_path` al montar la app ASGI. Las notas de abajo describen el router de Litestar relativo a ese montaje (`/v4/translator`), pero el path público real — el que S5 debe testear y el que Track C (`nllb-client.ts`) ya usa — es **`/api/v4/translator`**, y el batch nuevo será **`/api/v4/translator/batch`**. Ningún ajuste de código hace falta — el contrato ya documentado en el plan (`POST /api/v4/translator/batch`) era correcto; esto solo llena el hueco de POR QUÉ, para que S5 no se confunda si prueba local sin el `/api` y ve 404/401 inesperados.
+
 ## Paths reales (vs. lo que asumió el plan)
 | Plan asumió | Real |
 |---|---|
