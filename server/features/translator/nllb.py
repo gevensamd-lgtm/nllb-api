@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from logging import getLogger
 from pathlib import Path
 from typing import Self
 
@@ -9,6 +10,8 @@ from server.features.translator.protocol import TranslatorProtocol
 from server.features.translator.stub import TranslatorStub
 from server.typedefs import Language
 from server.utils import huggingface_download
+
+logger = getLogger(__name__)
 
 
 class Translator(TranslatorProtocol):
@@ -198,6 +201,118 @@ class Translator(TranslatorProtocol):
             self.tokeniser.decode((token,))
             for token in self.translate_generator(text, source_language, target_language)
         )
+
+    def _encode_one(self, text: str, source_language: Language) -> list[str]:
+        """
+        Summary
+        -------
+        tokeniza UN texto para el camino batch
+
+        Aislado en su propio metodo para que un fallo de tokenizacion de un item
+        se pueda capturar por item sin abortar el lote (ver `translate_batch_texts`).
+        """
+        return [source_language, *self.tokeniser.encode(text).tokens]
+
+    def translate_batch_texts(
+        self, texts: list[str], source_language: Language, target_language: Language
+    ) -> list[str | None]:
+        """
+        Summary
+        -------
+        traduce N textos en UNA pasada de CTranslate2 (`translate_batch`), en vez de N
+        pasadas de `translate()`
+
+        Contrato (igual que el endpoint single: NUNCA lanza):
+        - `results[i]` corresponde a `texts[i]`; mismo largo, mismo orden que `texts`.
+        - `None` = ese texto no se pudo traducir (vacio, o fallo puntual de
+          tokenizacion/decodificacion); el resto del lote sigue.
+        - texto vacio (o solo espacios) -> `None`, sin pasar por el traductor. Un texto
+          vacio NUNCA se le manda a `translate_batch`: CTranslate2 no lanza ni devuelve
+          vacio para ese caso, alucina una traduccion con forma valida pero sin
+          relacion con el input (confirmado empiricamente, ver docs/BATCH-SPIKE-NOTES.md).
+        - source_language == target_language -> se devuelve el original, sin gastar
+          computo.
+
+        Parameters
+        ----------
+        texts (list[str])
+            los textos a traducir
+
+        source_language (Language)
+            el idioma origen
+
+        target_language (Language)
+            el idioma destino
+
+        Returns
+        -------
+        translated_texts (list[str | None])
+            la traduccion de cada texto, en el mismo orden y con el mismo largo que
+            `texts`; `None` en la posicion de cualquier texto que no se pudo traducir
+        """
+        if not texts:
+            return []
+
+        # Atajo determinista antes de tocar el modelo: mismo criterio que el
+        # driver single-text del cliente, ahora tambien server-side.
+        if source_language == target_language:
+            return list(texts)
+
+        # Se tokeniza solo lo traducible y se recuerda de que posicion del
+        # request vino cada uno — asi un vacio (o un fallo de tokenizacion)
+        # deja SU posicion en None sin correr el resto del lote. El filtro de
+        # vacios pasa ANTES de construir source_tokens: no hay señal post-hoc
+        # (excepcion, hipotesis vacia) que permita detectarlos despues de
+        # llamar a translate_batch.
+        indices: list[int] = []
+        source_tokens: list[list[str]] = []
+        results: list[str | None] = [None] * len(texts)
+
+        for i, text in enumerate(texts):
+            if not text.strip():
+                continue
+            try:
+                source_tokens.append(self._encode_one(text, source_language))
+                indices.append(i)
+            except Exception:  # noqa: BLE001 - un item roto no aborta el lote
+                logger.warning("batch: fallo de tokenizacion en el item %d", i)
+
+        if not source_tokens:
+            return results
+
+        target_prefix = [[target_language]] * len(source_tokens)
+
+        try:
+            batch = self.translator.translate_batch(
+                source_tokens,
+                target_prefix=target_prefix,
+                max_decoding_length=1024,
+                sampling_temperature=0,
+                no_repeat_ngram_size=3,
+                suppress_sequences=target_prefix,
+            )
+        except Exception:
+            logger.exception("batch: translate_batch fallo para el lote completo")
+            return results
+
+        # strict=False (default) a proposito: si translate_batch alguna vez
+        # devolviera una lista de largo distinto a indices (hoy garantizado
+        # estructuralmente porque ambas derivan de source_tokens, pero el
+        # invariante es "NUNCA lanza", sin excepciones por "no deberia
+        # pasar"), zip trunca al mas corto en vez de lanzar ValueError — las
+        # posiciones sin traduccion quedan en None (su valor por defecto),
+        # degradando en silencio en vez de reventar.
+        for position, translation in zip(indices, batch, strict=False):
+            try:
+                # hypotheses[0][0] es el token de idioma destino - saltearlo antes
+                # de reconvertir a ids y decodificar (ver docs/BATCH-SPIKE-NOTES.md).
+                hypothesis_tokens = translation.hypotheses[0][1:]
+                token_ids = [self.tokeniser.token_to_id(token) for token in hypothesis_tokens]
+                results[position] = self.tokeniser.decode(token_ids)
+            except Exception:  # noqa: BLE001 - un item roto no aborta el lote
+                logger.warning("batch: fallo al decodificar el item %d", position)
+
+        return results
 
 
 def get_translator(

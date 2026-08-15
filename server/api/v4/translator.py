@@ -7,7 +7,7 @@ from litestar.response.sse import ServerSentEvent
 from litestar.status_codes import HTTP_200_OK, HTTP_204_NO_CONTENT, HTTP_304_NOT_MODIFIED
 
 from server.guards import requires_secret
-from server.schemas.v1 import Tokens, Translated, Translation
+from server.schemas.v1 import BatchTranslated, BatchTranslation, Tokens, Translated, Translation
 from server.typedefs import AppState, Language
 
 
@@ -114,6 +114,15 @@ class TranslatorController(Controller):
         the POST variant of the `/translator` route
         """
         return Translated(result=state.translator.translate(data.text, data.source, data.target))
+
+    @post("/batch", status_code=HTTP_200_OK, sync_to_thread=True)
+    def translator_batch(self, state: AppState, data: BatchTranslation) -> BatchTranslated:
+        """
+        Summary
+        -------
+        translate N texts in a single pass; the GET/POST single-text routes above are untouched
+        """
+        return BatchTranslated(results=state.translator.translate_batch_texts(data.texts, data.source, data.target))
 
     @get("/stream", sync_to_thread=True)
     def translator_stream(

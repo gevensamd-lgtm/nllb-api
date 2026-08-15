@@ -12,6 +12,7 @@ from pytest import fixture
 
 from server.app import app
 from server.config import Config
+from server.features.translator import TranslatorProtocol
 
 
 def client_factory(config: Config, *, no_lifespans: bool) -> AsyncTestClient[Litestar]:
@@ -54,6 +55,11 @@ async def session_client(auth_token: str) -> AsyncIterator[AsyncTestClient[Lites
 
     async with AsyncTestClient(app=app(config), backend_options={"use_uvloop": True}) as client:
         yield client
+
+
+@fixture(scope="session")
+def translator(session_client: AsyncTestClient[Litestar]) -> TranslatorProtocol:
+    return session_client.app.state.translator
 
 
 @fixture(scope="session")

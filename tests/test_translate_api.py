@@ -36,6 +36,12 @@ async def count_tokens(client: AsyncTestClient[Litestar], text: str) -> Response
     return await client.get("/v4/translator/tokens", params={"text": text})
 
 
+async def translate_batch_post(
+    client: AsyncTestClient[Litestar], texts: list[str], source: str, target: str
+) -> Response:
+    return await client.post("/v4/translator/batch", json={"texts": texts, "source": source, "target": target})
+
+
 async def load_model(client: AsyncTestClient[Litestar], *, auth_token: str, keep_cache: bool) -> Response:
     return await client.put(
         "/v4/translator",
@@ -129,6 +135,39 @@ async def test_translate_with_empty_fields(
 ) -> None:
     response = await translate(session_client, text, source, target)
     assert response.status_code == HTTP_400_BAD_REQUEST
+
+
+async def test_batch_devuelve_results_del_mismo_largo_y_orden(session_client: AsyncTestClient[Litestar]) -> None:
+    response = await translate_batch_post(session_client, ["Good morning", "Thank you"], "eng_Latn", "spa_Latn")
+
+    assert response.status_code == HTTP_200_OK
+    results = response.json()["results"]
+    assert len(results) == 2  # noqa: PLR2004
+    assert results[0] is not None
+
+
+async def test_batch_con_texto_vacio_devuelve_null_en_esa_posicion(session_client: AsyncTestClient[Litestar]) -> None:
+    response = await translate_batch_post(session_client, ["Good morning", ""], "eng_Latn", "spa_Latn")
+
+    assert response.status_code == HTTP_200_OK
+    assert response.json()["results"][1] is None
+
+
+async def test_batch_con_source_igual_a_target_devuelve_los_originales(
+    session_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await translate_batch_post(session_client, ["hola", "adios"], "spa_Latn", "spa_Latn")
+
+    assert response.json()["results"] == ["hola", "adios"]
+
+
+async def test_el_endpoint_single_text_sigue_intacto(session_client: AsyncTestClient[Litestar]) -> None:
+    # REGRESION CRITICA: facturacion-cr consume ESTE endpoint en produccion.
+    response = await translate_get(session_client, "Good morning", "eng_Latn", "spa_Latn")
+
+    assert response.status_code == HTTP_200_OK
+    assert isinstance(response.json()["result"], str)
+    assert response.json()["result"].strip() != ""
 
 
 async def test_parallelism(session_client: AsyncTestClient[Litestar]) -> None:
