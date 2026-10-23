@@ -7,7 +7,7 @@ from pathlib import Path
 from subprocess import PIPE, Popen
 from sys import executable
 from types import SimpleNamespace
-from typing import TextIO
+from typing import IO
 from unittest.mock import Mock
 
 from litestar import Litestar
@@ -99,7 +99,7 @@ server.serve_forever()
 
 
 @fixture
-def native_query_server() -> Iterator[tuple[str, TextIO]]:
+def native_query_server() -> Iterator[tuple[str, IO[str]]]:
     # A separate process keeps the blocking Rust client independent of the GIL.
     with Popen([executable, "-u", "-c", _QUERY_SERVER], stdout=PIPE, text=True) as process:
         if process.stdout is None:
@@ -113,7 +113,7 @@ def native_query_server() -> Iterator[tuple[str, TextIO]]:
             process.wait(timeout=5)
 
 
-async def test_native_clients_forward_threshold_aliases(native_query_server: tuple[str, TextIO]) -> None:
+async def test_native_clients_forward_threshold_aliases(native_query_server: tuple[str, IO[str]]) -> None:
     url, output = native_query_server
     prediction = TranslatorClient(base_url=url).detect_language(
         "synthetic text only", fast_model_confidence_threshold=0.5, accurate_model_confidence_threshold=0.25
