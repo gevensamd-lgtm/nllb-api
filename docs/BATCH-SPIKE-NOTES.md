@@ -106,7 +106,7 @@ tokenizer real (`tokenizers.Tokenizer.from_file(".../tokenizer.json")`).
   )
 
   for text, result in zip(texts, results):
-      hyp = result.hypotheses[0]                       # lista de tokens (str), no ids
+      hyp = result.hypotheses[0]  # lista de tokens (str), no ids
       ids = [tokeniser.token_to_id(tok) for tok in hyp[1:]]  # [0] es el token de idioma destino, SALTEARLO
       decoded = tokeniser.decode(ids)
   ```
