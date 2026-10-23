@@ -9,6 +9,8 @@ RUN apt-get update && apt-get -y --no-remove upgrade \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir --upgrade pip==26.2.2
+COPY scripts/prune_retired_ca.py /usr/local/libexec/prune_retired_ca.py
+RUN --network=none python /usr/local/libexec/prune_retired_ca.py
 COPY requirements-models.lock ./
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements-models.lock
 COPY server/model_integrity.py /opt/model_integrity.py
@@ -36,6 +38,8 @@ RUN apt-get update && apt-get -y --no-remove upgrade \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir --upgrade pip==26.2.2
+COPY scripts/prune_retired_ca.py /usr/local/libexec/prune_retired_ca.py
+RUN --network=none python /usr/local/libexec/prune_retired_ca.py
 COPY --from=uv_binary /uv /bin/
 COPY --from=rust_toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust_toolchain /usr/local/rustup /usr/local/rustup
@@ -64,7 +68,8 @@ FROM gcr.io/distroless/python3-debian13:nonroot@sha256:727eccc5d83f11273c9546526
 FROM busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e AS distroless-trimmed
 
 COPY --from=distroless / /distroless/
-RUN rm -rf /distroless/usr/bin/python3* /distroless/usr/lib/python3*
+RUN rm -rf /distroless/usr/bin/python3* /distroless/usr/lib/python3* \
+    /distroless/etc/ssl/certs /distroless/usr/share/ca-certificates /distroless/usr/lib/ssl
 
 
 FROM scratch
