@@ -2,7 +2,7 @@ from typing import Annotated, get_args
 
 from litestar import Controller, Response, delete, get, post, put
 from litestar.openapi.spec.example import Example
-from litestar.params import Parameter
+from litestar.params import JSONBody, QueryParameter
 from litestar.response.sse import ServerSentEvent
 from litestar.status_codes import HTTP_200_OK, HTTP_204_NO_CONTENT, HTTP_304_NOT_MODIFIED
 
@@ -25,7 +25,7 @@ class TranslatorController(Controller):
         self,
         state: AppState,
         *,
-        to_cpu: Annotated[bool, Parameter(description="whether to unload the model to CPU")] = False,
+        to_cpu: Annotated[bool, QueryParameter(description="whether to unload the model to CPU")] = False,
     ) -> Response[None]:
         """
         Summary
@@ -42,7 +42,7 @@ class TranslatorController(Controller):
         self,
         state: AppState,
         *,
-        keep_cache: Annotated[bool, Parameter(description="whether to keep the model cache in RAM")] = False,
+        keep_cache: Annotated[bool, QueryParameter(description="whether to keep the model cache in RAM")] = False,
     ) -> Response[None]:
         """
         Summary
@@ -60,7 +60,7 @@ class TranslatorController(Controller):
     def tokens(
         self,
         state: AppState,
-        text: Annotated[str, Parameter(min_length=1, description="source text of a single language")],
+        text: Annotated[str, QueryParameter(min_length=1, description="source text of a single language")],
     ) -> Tokens:
         """
         Summary
@@ -75,7 +75,7 @@ class TranslatorController(Controller):
         state: AppState,
         text: Annotated[
             str,
-            Parameter(
+            QueryParameter(
                 min_length=1,
                 description="source text of a single language",
                 examples=[
@@ -86,14 +86,14 @@ class TranslatorController(Controller):
         ],
         source: Annotated[
             Language,
-            Parameter(
+            QueryParameter(
                 description="source language in the FLORES-200 code format",
                 examples=[Example(summary=code, value=code) for code in get_args(Language.__value__)],
             ),
         ] = "eng_Latn",
         target: Annotated[
             Language,
-            Parameter(
+            QueryParameter(
                 description="target language in the FLORES-200 code format",
                 examples=[Example(summary=code, value=code) for code in get_args(Language.__value__)],
             ),
@@ -107,7 +107,7 @@ class TranslatorController(Controller):
         return Translated(result=state.translator.translate(text, source, target))
 
     @post(status_code=HTTP_200_OK, sync_to_thread=True, deprecated=True)
-    def translator_post(self, state: AppState, data: Translation) -> Translated:
+    def translator_post(self, state: AppState, data: JSONBody[Translation]) -> Translated:
         """
         Summary
         -------
@@ -116,7 +116,7 @@ class TranslatorController(Controller):
         return Translated(result=state.translator.translate(data.text, data.source, data.target))
 
     @post("/batch", status_code=HTTP_200_OK, sync_to_thread=True)
-    def translator_batch(self, state: AppState, data: BatchTranslation) -> BatchTranslated:
+    def translator_batch(self, state: AppState, data: JSONBody[BatchTranslation]) -> BatchTranslated:
         """
         Summary
         -------
@@ -130,7 +130,7 @@ class TranslatorController(Controller):
         state: AppState,
         text: Annotated[
             str,
-            Parameter(
+            QueryParameter(
                 min_length=1,
                 description="source text of a single language",
                 examples=[
@@ -141,20 +141,20 @@ class TranslatorController(Controller):
         ],
         source: Annotated[
             Language,
-            Parameter(
+            QueryParameter(
                 description="source language in the FLORES-200 code format",
                 examples=[Example(summary=code, value=code) for code in get_args(Language.__value__)],
             ),
         ] = "eng_Latn",
         target: Annotated[
             Language,
-            Parameter(
+            QueryParameter(
                 description="target language in the FLORES-200 code format",
                 examples=[Example(summary=code, value=code) for code in get_args(Language.__value__)],
             ),
         ] = "spa_Latn",
         event_type: Annotated[
-            str | None, Parameter(description="the event that an event listener will listen for")
+            str | None, QueryParameter(description="the event that an event listener will listen for")
         ] = None,
     ) -> ServerSentEvent:
         """
