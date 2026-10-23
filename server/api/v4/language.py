@@ -2,7 +2,7 @@ from typing import Annotated
 
 from litestar import get
 from litestar.openapi.spec.example import Example
-from litestar.params import Parameter
+from litestar.params import QueryParameter
 
 from server.schemas.v1 import LanguageResult
 from server.typedefs import AppState
@@ -13,7 +13,7 @@ def language(
     state: AppState,
     text: Annotated[
         str,
-        Parameter(
+        QueryParameter(
             description="sample text for language detection",
             max_length=512,
             min_length=1,
@@ -25,8 +25,8 @@ def language(
     ],
     fast_model_confidence_threshold: Annotated[
         float,
-        Parameter(
-            query="fast-model-confidence-threshold",
+        QueryParameter(
+            name="fast-model-confidence-threshold",
             description="minimum acceptable confidence before using the accurate model results",
             ge=0.0,
             le=1.1,
@@ -39,8 +39,8 @@ def language(
     ] = 0.85,
     accurate_model_confidence_threshold: Annotated[
         float,
-        Parameter(
-            query="accurate-model-confidence-threshold",
+        QueryParameter(
+            name="accurate-model-confidence-threshold",
             description="minimum acceptable confidence before falling back to the faster model results",
             ge=0.0,
             le=1.0,

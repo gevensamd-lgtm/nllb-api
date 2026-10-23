@@ -1,0 +1,3 @@
+# Existing model download APIs, resolved independently from native inference.
+huggingface-hub==2.2.0
+certifi==2026.10.19

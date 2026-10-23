@@ -8,10 +8,10 @@ from typing import Literal
 
 from litestar import Litestar, Response, Router
 from litestar.config.cors import CORSConfig
-from litestar.contrib.opentelemetry import OpenTelemetryConfig, OpenTelemetryPlugin
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.spec import Server
 from litestar.plugins import PluginProtocol
+from litestar.plugins.opentelemetry import OpenTelemetryConfig, OpenTelemetryPlugin
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from litestar.types import Method
 
